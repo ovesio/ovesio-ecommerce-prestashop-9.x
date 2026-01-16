@@ -7,6 +7,7 @@ class OvesioExport
 {
     private $context;
     private $db;
+    private $categoryCache = [];
 
     public function __construct()
     {
@@ -58,6 +59,9 @@ class OvesioExport
         $data = [];
 
         if ($orders && is_array($orders)) {
+            $orderIds = array_column($orders, 'order_id');
+            $allOrderProducts = $this->getAllOrderProducts($orderIds);
+
             foreach ($orders as $row) {
                 $orderId = (int)$row['order_id'];
                 $orderCurrencyId = (int)$row['id_currency'];
@@ -72,7 +76,19 @@ class OvesioExport
                     $rateToUse = $conversionRate;
                 }
 
-                $orderProducts = $this->getOrderProducts($orderId, $rateToUse, $defaultCurrencyIso);
+                $orderProducts = [];
+                if (isset($allOrderProducts[$orderId])) {
+                    foreach ($allOrderProducts[$orderId] as $p) {
+                         $price = (float)$p['price'];
+                         if ($rateToUse != 1.0 && $rateToUse > 0) {
+                             $price = $price / $rateToUse;
+                         }
+                         
+                         $p['price'] = $price;
+                         //$p['currency'] = $defaultCurrencyIso;
+                         $orderProducts[] = $p;
+                    }
+                }
 
                 $data[$orderId] = [
                     'order_id' => $orderId,
@@ -88,10 +104,17 @@ class OvesioExport
         return array_values($data);
     }
 
-    private function getOrderProducts($orderId, $conversionRate = 1.0, $currencyIso = '')
+    private function getAllOrderProducts($orderIds)
     {
+        if (empty($orderIds)) {
+            return [];
+        }
+
+        $ids = implode(',', array_map('intval', $orderIds));
+
         $sql = '
             SELECT
+                od.id_order,
                 od.product_id,
                 od.product_attribute_id,
                 od.product_reference as sku,
@@ -99,7 +122,7 @@ class OvesioExport
                 od.product_quantity as quantity,
                 od.unit_price_tax_incl as price
             FROM `' . _DB_PREFIX_ . 'order_detail` od
-            WHERE od.id_order = ' . (int)$orderId;
+            WHERE od.id_order IN (' . $ids . ')';
 
         $rows = $this->db->executeS($sql);
         $products = [];
@@ -118,17 +141,11 @@ class OvesioExport
                 }
             }
 
-            $price = (float)$p['price'];
-            if ($conversionRate != 1.0 && $conversionRate > 0) {
-                $price = $price / $conversionRate;
-            }
-
-            $products[] = [
+            $products[$p['id_order']][] = [
                 'sku' => $sku,
                 'name' => $p['name'],
                 'quantity' => (int)$p['quantity'],
-                'price' => (float)$price,
-                'currency' => $currencyIso
+                'price' => (float)$p['price']
             ];
         }
 
@@ -141,10 +158,14 @@ class OvesioExport
         $idShop = (int)$this->context->shop->id;
         $idGroup = (int)$this->context->customer->id ? $this->context->customer->id_default_group : Group::getCurrent()->id;
         $currencyIso = $this->context->currency->iso_code;
+        
+        // Preload categories
+        $this->preloadCategories($idLang);
 
         $sql = '
             SELECT
                 p.id_product,
+                p.id_category_default,
                 p.reference as sku,
                 pl.name,
                 pl.description_short,
@@ -202,7 +223,8 @@ class OvesioExport
             }
 
             $productUrl = $link->getProductLink($row['id_product'], $row['link_rewrite'], null, null, $idLang, $idShop);
-            $categoryPath = $this->getNextCategoryPath($row['id_product'], $idLang);
+            $categoryPath = $this->getNextCategoryPath((int)$row['id_category_default']);
+
 
             $data[$sku] = [
                 'sku' => $sku,
@@ -222,24 +244,49 @@ class OvesioExport
         return array_values($data);
     }
 
-    private function getNextCategoryPath($idProduct, $idLang)
+    private function getNextCategoryPath($idCategory)
     {
-        $product = new Product($idProduct);
-        $idCategoryDefault = $product->id_category_default;
-
-        $category = new Category($idCategoryDefault, $idLang);
-        $parents = $category->getParentsCategories($idLang);
-
         $path = [];
-        foreach ($parents as $parent) {
-            if ($parent['id_category'] == Configuration::get('PS_ROOT_CATEGORY') || $parent['id_category'] == Configuration::get('PS_HOME_CATEGORY')) {
-                continue;
+        $currentId = $idCategory;
+
+        while ($currentId && isset($this->categoryCache[$currentId])) {
+            $cat = $this->categoryCache[$currentId];
+            
+            // Allow root or home if it is the direct category, but usually we skip them in path
+            // Matching logic from previous implementation: skip Root and Home
+            if ($cat['id_category'] != Configuration::get('PS_ROOT_CATEGORY') && $cat['id_category'] != Configuration::get('PS_HOME_CATEGORY')) {
+                 $path[] = $cat['name'];
             }
-            $path[] = $parent['name'];
+            
+            $currentId = $cat['id_parent'];
+            
+            // Prevent infinite loops in case of check circular reference
+             if ($currentId == $cat['id_category']) {
+                 break;
+             }
         }
+        
         $path = array_reverse($path);
 
         return implode(' > ', $path);
+    }
+    
+    private function preloadCategories($idLang)
+    {
+        $sql = '
+            SELECT c.id_category, c.id_parent, cl.name
+            FROM `' . _DB_PREFIX_ . 'category` c
+            LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl ON (c.id_category = cl.id_category AND cl.id_shop = ' . (int)$this->context->shop->id . ')
+            WHERE cl.id_lang = ' . (int)$idLang . '
+            AND c.active = 1
+        ';
+        
+        $results = $this->db->executeS($sql);
+        if ($results) {
+            foreach ($results as $row) {
+                $this->categoryCache[$row['id_category']] = $row;
+            }
+        }
     }
 
     private function htmlToPlainText($content)
