@@ -1,4 +1,5 @@
 # Ovesio - Ecommerce Intelligence Module for PrestaShop 9.x
+
 **Ovesio - Ecommerce Intelligence** empowers your PrestaShop store with advanced AI-driven insights, stock management forecasting, and strategic consulting. This module generates secure data feeds for your products and orders, allowing the Ovesio platform to analyze your business performance in real-time.
 
 ## Features
@@ -67,7 +68,7 @@ When you install this module, a unique **Security Hash** is automatically genera
 
 ## Support
 
-This module is developed and maintained by Aweb Design SRL for Ovesio.com. For documentation and API references, visit [https://ovesio.com/docs](https://ovesio.com/docs).
+This module is developed and maintained by Aweb Design SRL for Ovesio.com. For documentation and API references, visit [https://docs.ovesio.com](https://docs.ovesio.com).
 
 For technical support or bug reports, please contact Ovesio support.
 
@@ -77,7 +78,10 @@ Aweb Design SRL
 
 ## License
 
-MIT License. See LICENSE file for details.
+This package is released under the **MIT License**. See LICENSE file for details.
+We are **not responsible** for any malfunction or improper behavior caused by the use of this package.
+This package is provided as an **example integration**.
+For production-ready integrations, we highly recommend using our official API endpoints and documentation, available at [https://docs.ovesio.com](https://docs.ovesio.com).
 
 ## Disclaimer
 
